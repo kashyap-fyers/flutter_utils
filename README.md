@@ -27,6 +27,15 @@ A powerful VS Code extension that streamlines Flutter build processes for APK, I
 - **Generate Fyers Launch Config** - Generate VS Code launch.json configurations for Fyers App (web + mobile)
 - **Add Flutter Cursor Rules** - Copy Flutter coding rules and best practices to project's `.cursor/rules/` folder
 
+### 📦 Submodules
+
+- **Submodule Update** - After `git pull` or branch switch. Sync `packages/` to the SHAs recorded by the parent repo (`git submodule update --init --recursive`)
+- **Submodule Remote Status** - List which submodules are behind `origin/<branch>` from `.gitmodules` (read-only scan)
+- **Submodule Update Remote** - Scan remotes, then bump **only outdated** submodules to branch tips. Review `git status`, then commit pointer changes in the parent repo
+- **Submodule Update Remote (All)** - Bump every submodule to remote branch tip (use when you need a full refresh)
+- **Submodule Update + Pub Get** - After pull: sync submodules to recorded SHAs, then `flutter pub get` at app root
+- **Bump Single Submodule** - Pick one package (e.g. `fy_ui`). Update only that submodule to latest on its `.gitmodules` branch; commit when ready
+
 ### 🔀 Git Actions
 
 - **Open Repository** - Open GitHub repository in browser (with current branch if not main/master)
@@ -91,6 +100,14 @@ A powerful VS Code extension that streamlines Flutter build processes for APK, I
    - 📝 **Generate FyUI MCP Config** - Create MCP configuration for FyUI library
    - 🐛 **Generate Fyers Launch Config** - Create launch.json for Fyers App debugging
    - 📄 **Add Flutter Cursor Rules** - Add Flutter coding rules to project
+
+**Submodules Section:**
+   - 🔄 **Submodule Update** - Sync packages to parent-recorded SHAs
+   - 📋 **Submodule Remote Status** - List submodules behind remote
+   - ⬇️ **Submodule Update Remote** - Bump outdated submodules only
+   - ⬇️ **Submodule Update Remote (All)** - Bump every submodule
+   - 🔁 **Submodule Update + Pub Get** - Sync submodules + root pub get
+   - ⬆️ **Bump Single Submodule** - Bump one package submodule
 
 **Git Actions Section:**
    - 📂 **Open Repository** - Open GitHub repo in browser

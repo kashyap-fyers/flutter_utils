@@ -378,6 +378,75 @@ export class BuildTreeProvider implements vscode.TreeDataProvider<BuildTreeItem>
             )
         );
 
+        // Submodules section header
+        items.push(
+            new BuildTreeItem(
+                '',
+                '',
+                vscode.TreeItemCollapsibleState.None,
+                'separator',
+                new vscode.ThemeIcon('dash')
+            ),
+            new BuildTreeItem(
+                'Submodules',
+                '',
+                vscode.TreeItemCollapsibleState.None,
+                'sectionHeader',
+                new vscode.ThemeIcon('repo-forked')
+            )
+        );
+
+        items.push(
+            new BuildTreeItem(
+                '  Submodule Update',
+                'Sync packages/ to the SHAs recorded by the parent repo',
+                vscode.TreeItemCollapsibleState.None,
+                'gitAction',
+                new vscode.ThemeIcon('git-branch', new vscode.ThemeColor('charts.blue')),
+                'flutter-build-utils.submoduleUpdate'
+            ),
+            new BuildTreeItem(
+                '  Submodule Remote Status',
+                'List submodules behind origin/<branch> from .gitmodules (no updates)',
+                vscode.TreeItemCollapsibleState.None,
+                'gitAction',
+                new vscode.ThemeIcon('list-unordered', new vscode.ThemeColor('charts.yellow')),
+                'flutter-build-utils.submoduleRemoteStatus'
+            ),
+            new BuildTreeItem(
+                '  Submodule Update Remote',
+                'Scan remotes, then bump only outdated submodules to branch tips',
+                vscode.TreeItemCollapsibleState.None,
+                'gitAction',
+                new vscode.ThemeIcon('cloud-download', new vscode.ThemeColor('charts.orange')),
+                'flutter-build-utils.submoduleUpdateRemote'
+            ),
+            new BuildTreeItem(
+                '  Submodule Update Remote (All)',
+                'Bump every submodule to its .gitmodules branch tip (slow for large monorepos)',
+                vscode.TreeItemCollapsibleState.None,
+                'gitAction',
+                new vscode.ThemeIcon('cloud-download', new vscode.ThemeColor('charts.red')),
+                'flutter-build-utils.submoduleUpdateRemoteAll'
+            ),
+            new BuildTreeItem(
+                '  Submodule Update + Pub Get',
+                'Sync submodules to recorded SHAs, then flutter pub get at app root',
+                vscode.TreeItemCollapsibleState.None,
+                'gitAction',
+                new vscode.ThemeIcon('sync', new vscode.ThemeColor('charts.green')),
+                'flutter-build-utils.submoduleUpdateAndPubGet'
+            ),
+            new BuildTreeItem(
+                '  Bump Single Submodule',
+                'Update one packages/ submodule to latest on its .gitmodules branch',
+                vscode.TreeItemCollapsibleState.None,
+                'gitAction',
+                new vscode.ThemeIcon('arrow-up', new vscode.ThemeColor('charts.purple')),
+                'flutter-build-utils.submoduleUpdateRemoteOne'
+            )
+        );
+
         // Git Actions section header
         items.push(
             new BuildTreeItem(
@@ -599,7 +668,7 @@ export class BuildTreeProvider implements vscode.TreeDataProvider<BuildTreeItem>
             return 'Waiting...';
         }
         if (stepStatus.status === CommandStatus.InProgress) {
-            return 'Running...';
+            return 'Running... (see Output)';
         }
         if (stepStatus.endTime && stepStatus.startTime) {
             const duration = (stepStatus.endTime.getTime() - stepStatus.startTime.getTime()) / 1000;

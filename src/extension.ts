@@ -15,6 +15,7 @@ import {
     generateFreezedModel,
     generateFreezedUiState
 } from './codeGenerator';
+import { hasGitmodules, parseGitmodules } from './submoduleUtils';
 import { BuildType } from './types';
 import { UtilityRunner } from './utilityRunner';
 
@@ -203,6 +204,36 @@ export function activate(context: vscode.ExtensionContext) {
         () => handleAddFlutterCursorRules(context)
     );
 
+    const submoduleUpdateCommand = vscode.commands.registerCommand(
+        'flutter-build-utils.submoduleUpdate',
+        () => handleSubmoduleUpdate()
+    );
+
+    const submoduleRemoteStatusCommand = vscode.commands.registerCommand(
+        'flutter-build-utils.submoduleRemoteStatus',
+        () => handleSubmoduleRemoteStatus()
+    );
+
+    const submoduleUpdateRemoteCommand = vscode.commands.registerCommand(
+        'flutter-build-utils.submoduleUpdateRemote',
+        () => handleSubmoduleUpdateRemote()
+    );
+
+    const submoduleUpdateRemoteAllCommand = vscode.commands.registerCommand(
+        'flutter-build-utils.submoduleUpdateRemoteAll',
+        () => handleSubmoduleUpdateRemoteAll()
+    );
+
+    const submoduleUpdateAndPubGetCommand = vscode.commands.registerCommand(
+        'flutter-build-utils.submoduleUpdateAndPubGet',
+        () => handleSubmoduleUpdateAndPubGet()
+    );
+
+    const submoduleUpdateRemoteOneCommand = vscode.commands.registerCommand(
+        'flutter-build-utils.submoduleUpdateRemoteOne',
+        () => handleSubmoduleUpdateRemoteOne()
+    );
+
     const gitPushCommand = vscode.commands.registerCommand(
         'flutter-build-utils.gitPush',
         () => handleGitCommand('push')
@@ -244,6 +275,12 @@ export function activate(context: vscode.ExtensionContext) {
         generateFreezedUiStateCommand,
         generateFreezedModelCommand,
         addFlutterCursorRulesCommand,
+        submoduleUpdateCommand,
+        submoduleRemoteStatusCommand,
+        submoduleUpdateRemoteCommand,
+        submoduleUpdateRemoteAllCommand,
+        submoduleUpdateAndPubGetCommand,
+        submoduleUpdateRemoteOneCommand,
         gitPushCommand,
         gitPullCommand,
         gitPullAllInFolderCommand,
@@ -1352,6 +1389,178 @@ function openFolderInFinder(folderPath: string): void {
             vscode.window.showErrorMessage(`Failed to open folder: ${error.message}`);
         }
     });
+}
+
+/**
+ * Require workspace with .gitmodules for submodule commands.
+ */
+async function requireSubmoduleWorkspace(): Promise<string | undefined> {
+    const workspaceFolder = await getWorkspaceFolder();
+    if (!workspaceFolder) {
+        vscode.window.showErrorMessage('No workspace folder found. Please open a Flutter project.');
+        return undefined;
+    }
+
+    if (!hasGitmodules(workspaceFolder)) {
+        vscode.window.showErrorMessage(
+            'No .gitmodules found in workspace. Open a repo that uses git submodules (e.g. fyers_app, fy_insti).'
+        );
+        return undefined;
+    }
+
+    return workspaceFolder;
+}
+
+async function handleSubmoduleUpdate(): Promise<void> {
+    try {
+        const workspaceFolder = await requireSubmoduleWorkspace();
+        if (!workspaceFolder) {
+            return;
+        }
+
+        const flutterCommand = getFlutterCommand();
+        await utilityRunner.executeSubmoduleUpdate(workspaceFolder, flutterCommand);
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Submodule update error: ${error.message}`);
+    }
+}
+
+async function handleSubmoduleRemoteStatus(): Promise<void> {
+    try {
+        const workspaceFolder = await requireSubmoduleWorkspace();
+        if (!workspaceFolder) {
+            return;
+        }
+
+        const flutterCommand = getFlutterCommand();
+        await utilityRunner.executeSubmoduleRemoteStatus(workspaceFolder, flutterCommand);
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Submodule remote status error: ${error.message}`);
+    }
+}
+
+async function handleSubmoduleUpdateRemote(): Promise<void> {
+    try {
+        const workspaceFolder = await requireSubmoduleWorkspace();
+        if (!workspaceFolder) {
+            return;
+        }
+
+        const flutterCommand = getFlutterCommand();
+        const result = await utilityRunner.executeSubmoduleUpdateRemote(
+            workspaceFolder,
+            flutterCommand,
+            async (outdatedCount, totalCount) => {
+                const choice = await vscode.window.showWarningMessage(
+                    `${outdatedCount} of ${totalCount} submodules are behind remote. Update them?`,
+                    { modal: true },
+                    'Update'
+                );
+                return choice === 'Update';
+            }
+        );
+
+        if (result.success && (result.updatedCount ?? 0) > 0) {
+            vscode.window.showInformationMessage(
+                `Updated ${result.updatedCount} submodule(s). Review git status and commit pointer changes in the parent repo.`
+            );
+        }
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Submodule update remote error: ${error.message}`);
+    }
+}
+
+async function handleSubmoduleUpdateRemoteAll(): Promise<void> {
+    try {
+        const workspaceFolder = await requireSubmoduleWorkspace();
+        if (!workspaceFolder) {
+            return;
+        }
+
+        const entries = parseGitmodules(workspaceFolder);
+        const choice = await vscode.window.showWarningMessage(
+            `Update all ${entries.length} submodules to remote branch tips? This may take a while.`,
+            { modal: true },
+            'Update All'
+        );
+
+        if (choice !== 'Update All') {
+            return;
+        }
+
+        const flutterCommand = getFlutterCommand();
+        const result = await utilityRunner.executeSubmoduleUpdateRemoteAll(workspaceFolder, flutterCommand);
+
+        if (result.success) {
+            vscode.window.showInformationMessage(
+                'Submodule update remote (all) completed. Review git status and commit pointer changes in the parent repo.'
+            );
+        }
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Submodule update remote (all) error: ${error.message}`);
+    }
+}
+
+async function handleSubmoduleUpdateAndPubGet(): Promise<void> {
+    try {
+        const workspaceFolder = await requireSubmoduleWorkspace();
+        if (!workspaceFolder) {
+            return;
+        }
+
+        const flutterCommand = getFlutterCommand();
+        await utilityRunner.executeSubmoduleUpdateAndPubGet(workspaceFolder, flutterCommand);
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Submodule update + pub get error: ${error.message}`);
+    }
+}
+
+async function handleSubmoduleUpdateRemoteOne(): Promise<void> {
+    try {
+        const workspaceFolder = await requireSubmoduleWorkspace();
+        if (!workspaceFolder) {
+            return;
+        }
+
+        const entries = parseGitmodules(workspaceFolder);
+        if (entries.length === 0) {
+            vscode.window.showErrorMessage('No submodules found in .gitmodules.');
+            return;
+        }
+
+        const pick = await vscode.window.showQuickPick(
+            entries.map(entry => ({
+                label: entry.name,
+                description: entry.branch ? `${entry.path} (${entry.branch})` : entry.path,
+                detail: entry.url,
+                entry
+            })),
+            {
+                placeHolder: 'Select submodule to bump to latest on its .gitmodules branch',
+                ignoreFocusOut: true
+            }
+        );
+
+        if (!pick) {
+            return;
+        }
+
+        const flutterCommand = getFlutterCommand();
+        const result = await utilityRunner.executeSubmoduleUpdateRemoteOne(
+            workspaceFolder,
+            pick.entry.path,
+            pick.entry.name,
+            flutterCommand
+        );
+
+        if (result.success) {
+            vscode.window.showInformationMessage(
+                `Bumped ${pick.entry.name}. Review git status and commit the submodule pointer in the parent repo.`
+            );
+        }
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Bump single submodule error: ${error.message}`);
+    }
 }
 
 /**

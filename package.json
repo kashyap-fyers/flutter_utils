@@ -2,7 +2,7 @@
   "name": "flutter-build-utils",
   "displayName": "flutter-toolbox",
   "description": "Comprehensive Flutter development toolkit with build automation (APK, IPA, Web), utilities (Clean, Pub Get, Build Runner, Analyze, Format, Pod Install), and MCP config generators. Real-time status tracking in sidebar.",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "skalex",
   "engines": {
     "vscode": "^1.85.0"
@@ -199,6 +199,36 @@
         "command": "flutter-build-utils.gitPullAllInFolder",
         "title": "Git: Pull (all in folder)",
         "icon": "$(arrow-down)"
+      },
+      {
+        "command": "flutter-build-utils.submoduleUpdate",
+        "title": "Git: Submodule Update",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "flutter-build-utils.submoduleRemoteStatus",
+        "title": "Git: Submodule Remote Status",
+        "icon": "$(list-unordered)"
+      },
+      {
+        "command": "flutter-build-utils.submoduleUpdateRemote",
+        "title": "Git: Submodule Update Remote (Outdated)",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "flutter-build-utils.submoduleUpdateRemoteAll",
+        "title": "Git: Submodule Update Remote (All)",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "flutter-build-utils.submoduleUpdateAndPubGet",
+        "title": "Git: Submodule Update + Pub Get",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "flutter-build-utils.submoduleUpdateRemoteOne",
+        "title": "Git: Bump Single Submodule",
+        "icon": "$(arrow-up)"
       }
     ],
     "menus": {

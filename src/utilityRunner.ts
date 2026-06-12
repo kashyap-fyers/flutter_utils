@@ -2,13 +2,24 @@
  * Utility Runner - Executes utility commands and manages their state
  */
 
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import * as vscode from 'vscode';
 import { BuildTreeProvider } from './buildTreeView';
+import {
+    formatSubmoduleRemoteStatusLine,
+    scanSubmoduleRemoteStatuses,
+    SubmoduleRemoteScanResult
+} from './submoduleStatus';
+import { buildSubmoduleCommandSpecs } from './submoduleUtils';
 import { BuildSession, BuildStep, CommandStatus, SessionStatus, SessionType } from './types';
 
 const execAsync = promisify(exec);
+
+interface UtilitySessionOptions {
+    skipFlutterVersion?: boolean;
+    skipSessionPreamble?: boolean;
+}
 
 export class UtilityRunner {
     private outputChannel: vscode.OutputChannel;
@@ -242,6 +253,180 @@ export class UtilityRunner {
     }
 
     /**
+     * Sync submodules to SHAs recorded by the parent repo.
+     */
+    async executeSubmoduleUpdate(
+        workspaceFolder: string,
+        flutterCommand: string
+    ): Promise<{ success: boolean; errorMessage?: string }> {
+        const steps = this.buildSubmoduleSteps(workspaceFolder, 'recorded');
+
+        return this.executeUtilityWithSession(
+            workspaceFolder,
+            flutterCommand,
+            'Submodule Update',
+            steps,
+            { skipFlutterVersion: true }
+        );
+    }
+
+    /**
+     * List submodules whose HEAD differs from origin/<branch> in .gitmodules.
+     */
+    async executeSubmoduleRemoteStatus(
+        workspaceFolder: string,
+        flutterCommand: string
+    ): Promise<{ success: boolean; scan?: SubmoduleRemoteScanResult }> {
+        this.outputChannel.clear();
+        this.outputChannel.show(true);
+
+        this.log(`\n${'='.repeat(60)}`);
+        this.log('Submodule Remote Status');
+        this.log(`${'='.repeat(60)}\n`);
+        this.log(`Workspace: ${workspaceFolder}\n`);
+
+        this.statusBarItem.text = '$(sync~spin) Checking submodule remotes...';
+        this.statusBarItem.show();
+
+        try {
+            const scan = await this.scanSubmoduleRemoteStatus(workspaceFolder);
+            this.logSummary(scan);
+
+            this.statusBarItem.text = `$(check) ${scan.outdated.length} outdated`;
+            setTimeout(() => this.statusBarItem.hide(), 5000);
+
+            vscode.window.showInformationMessage(
+                `Submodule remote status: ${scan.outdated.length} outdated, ${scan.upToDate.length} up to date, ${scan.skipped.length} skipped. See Output.`
+            );
+
+            return { success: true, scan };
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.statusBarItem.text = '$(error) Remote status failed';
+            setTimeout(() => this.statusBarItem.hide(), 5000);
+            vscode.window.showErrorMessage(`Submodule remote status failed: ${message}`);
+            return { success: false };
+        }
+    }
+
+    /**
+     * Fetch remote branch tips only for submodules behind origin.
+     */
+    async executeSubmoduleUpdateRemote(
+        workspaceFolder: string,
+        flutterCommand: string,
+        confirmUpdate: (outdatedCount: number, totalCount: number) => Promise<boolean>
+    ): Promise<{ success: boolean; errorMessage?: string; updatedCount?: number }> {
+        this.outputChannel.clear();
+        this.outputChannel.show(true);
+
+        this.log(`\n${'='.repeat(60)}`);
+        this.log('Submodule Update Remote (Outdated Only)');
+        this.log(`${'='.repeat(60)}\n`);
+        this.log(`Workspace: ${workspaceFolder}\n`);
+
+        this.statusBarItem.text = '$(sync~spin) Scanning submodule remotes...';
+        this.statusBarItem.show();
+
+        const scan = await this.scanSubmoduleRemoteStatus(workspaceFolder);
+        this.logSummary(scan);
+
+        if (scan.outdated.length === 0) {
+            this.statusBarItem.text = '$(check) All submodules up to date';
+            setTimeout(() => this.statusBarItem.hide(), 5000);
+            vscode.window.showInformationMessage('All submodules are already at their remote branch tips.');
+            return { success: true, updatedCount: 0 };
+        }
+
+        const confirmed = await confirmUpdate(scan.outdated.length, scan.statuses.length);
+        if (!confirmed) {
+            this.log('\nUpdate cancelled.\n');
+            this.statusBarItem.hide();
+            return { success: true, updatedCount: 0 };
+        }
+
+        const paths = scan.outdated.map(status => status.entry.path);
+        const steps = this.buildSubmoduleSteps(workspaceFolder, 'remote', paths);
+
+        return this.executeUtilityWithSession(
+            workspaceFolder,
+            flutterCommand,
+            `Submodule Update Remote (${paths.length})`,
+            steps,
+            { skipFlutterVersion: true, skipSessionPreamble: true }
+        ).then(result => ({ ...result, updatedCount: paths.length }));
+    }
+
+    /**
+     * Fetch latest commit on every submodule branch from .gitmodules.
+     */
+    async executeSubmoduleUpdateRemoteAll(
+        workspaceFolder: string,
+        flutterCommand: string
+    ): Promise<{ success: boolean; errorMessage?: string }> {
+        const steps = this.buildSubmoduleSteps(workspaceFolder, 'remote');
+
+        return this.executeUtilityWithSession(
+            workspaceFolder,
+            flutterCommand,
+            'Submodule Update Remote (All)',
+            steps,
+            { skipFlutterVersion: true }
+        );
+    }
+
+    /**
+     * Sync submodules to recorded SHAs, then pub get at app root.
+     */
+    async executeSubmoduleUpdateAndPubGet(
+        workspaceFolder: string,
+        flutterCommand: string
+    ): Promise<{ success: boolean; errorMessage?: string }> {
+        const steps: BuildStep[] = [
+            ...this.buildSubmoduleSteps(workspaceFolder, 'recorded'),
+            {
+                id: 'pub-get',
+                description: 'Get dependencies at app root',
+                command: '{FLUTTER_CMD} pub get'
+            }
+        ];
+
+        return this.executeUtilityWithSession(
+            workspaceFolder,
+            flutterCommand,
+            'Submodule Update + Pub Get',
+            steps,
+            { skipFlutterVersion: true }
+        );
+    }
+
+    /**
+     * Bump a single submodule to latest on its .gitmodules branch.
+     */
+    async executeSubmoduleUpdateRemoteOne(
+        workspaceFolder: string,
+        submodulePath: string,
+        submoduleName: string,
+        flutterCommand: string
+    ): Promise<{ success: boolean; errorMessage?: string }> {
+        const steps: BuildStep[] = [
+            {
+                id: 'submodule-update-remote-one',
+                description: `Update ${submoduleName} to remote branch tip`,
+                command: `git submodule update --init --remote --progress -- ${submodulePath}`
+            }
+        ];
+
+        return this.executeUtilityWithSession(
+            workspaceFolder,
+            flutterCommand,
+            `Bump Submodule (${submoduleName})`,
+            steps,
+            { skipFlutterVersion: true }
+        );
+    }
+
+    /**
      * Execute git pull. Returns success and optional error message for use in batch summaries.
      */
     async executeGitPull(
@@ -310,6 +495,57 @@ export class UtilityRunner {
         ).then(r => r.success);
     }
 
+    private async scanSubmoduleRemoteStatus(workspaceFolder: string): Promise<SubmoduleRemoteScanResult> {
+        return scanSubmoduleRemoteStatuses(workspaceFolder, (current, total, status) => {
+            this.log(`Checking ${current}/${total}: ${status.entry.path}`);
+            this.log(formatSubmoduleRemoteStatusLine(status));
+            this.statusBarItem.text = `$(sync~spin) Checking ${current}/${total}: ${status.entry.path}`;
+        });
+    }
+
+    private logSummary(scan: SubmoduleRemoteScanResult): void {
+        this.log(`\n${'─'.repeat(60)}`);
+        this.log('Summary');
+        this.log(`${'─'.repeat(60)}`);
+        this.log(`  Outdated:  ${scan.outdated.length}`);
+        this.log(`  Up to date: ${scan.upToDate.length}`);
+        this.log(`  Skipped:   ${scan.skipped.length} (ahead or diverged)`);
+        this.log(`  Errors:    ${scan.errored.length}`);
+        this.log(`${'─'.repeat(60)}\n`);
+
+        if (scan.outdated.length > 0) {
+            this.log('Will update:');
+            for (const status of scan.outdated) {
+                this.log(formatSubmoduleRemoteStatusLine(status));
+            }
+            this.log('');
+        }
+    }
+
+    private buildSubmoduleSteps(
+        workspaceFolder: string,
+        mode: 'recorded' | 'remote',
+        paths?: string[]
+    ): BuildStep[] {
+        const specs = buildSubmoduleCommandSpecs(workspaceFolder, mode, paths);
+        if (specs.length > 0) {
+            return specs;
+        }
+
+        const bulkCommand =
+            mode === 'remote'
+                ? 'git submodule update --init --remote --recursive --progress'
+                : 'git submodule update --init --recursive --progress';
+
+        return [
+            {
+                id: 'submodule-update-bulk',
+                description: 'Update all submodules',
+                command: bulkCommand
+            }
+        ];
+    }
+
     /**
      * Execute utility with session tracking
      */
@@ -317,21 +553,25 @@ export class UtilityRunner {
         workspaceFolder: string,
         flutterCommand: string,
         utilityName: string,
-        steps: BuildStep[]
+        steps: BuildStep[],
+        options?: UtilitySessionOptions
     ): Promise<{ success: boolean; errorMessage?: string }> {
-        this.outputChannel.clear();
-        this.outputChannel.show(true);
+        if (!options?.skipSessionPreamble) {
+            this.outputChannel.clear();
+            this.outputChannel.show(true);
 
-        this.log(`\n${'='.repeat(60)}`);
-        this.log(`Starting: ${utilityName}`);
-        this.log(`${'='.repeat(60)}\n`);
-        this.log(`Workspace: ${workspaceFolder}`);
-        this.log(`Flutter Command: ${flutterCommand}\n`);
+            this.log(`\n${'='.repeat(60)}`);
+            this.log(`Starting: ${utilityName}`);
+            this.log(`${'='.repeat(60)}\n`);
+            this.log(`Workspace: ${workspaceFolder}`);
+            this.log(`Flutter Command: ${flutterCommand}\n`);
+        } else {
+            this.outputChannel.show(true);
+            this.log(`\n${'='.repeat(60)}`);
+            this.log(`Starting updates: ${utilityName}`);
+            this.log(`${'='.repeat(60)}\n`);
+        }
 
-        // Show Flutter version
-        await this.showFlutterVersion(workspaceFolder, flutterCommand);
-
-        // Create session
         const sessionId = `util-${Date.now()}`;
         const session: BuildSession = {
             id: sessionId,
@@ -346,9 +586,19 @@ export class UtilityRunner {
             }))
         };
 
-        // Start session in tree view
         if (this.treeProvider) {
             this.treeProvider.startBuildSession(session);
+        }
+
+        this.statusBarItem.text = `$(sync~spin) ${utilityName}`;
+        this.statusBarItem.show();
+
+        if (!options?.skipFlutterVersion) {
+            await this.showFlutterVersion(workspaceFolder, flutterCommand);
+        }
+
+        if (steps.length > 1 && utilityName.toLowerCase().includes('submodule')) {
+            this.log(`Packages to process: ${steps.length}\n`);
         }
 
         let stepIndex = 0;
@@ -419,7 +669,7 @@ export class UtilityRunner {
     /**
      * Execute a single command
      */
-    private async executeCommand(
+    private executeCommand(
         command: string,
         cwd: string,
         step: BuildStep,
@@ -428,71 +678,79 @@ export class UtilityRunner {
     ): Promise<{ success: boolean; errorMessage?: string }> {
         this.log(`⏳ Status: In Progress\n`);
 
-        try {
-            const { stdout, stderr } = await execAsync(command, {
+        return new Promise(resolve => {
+            const outputChunks: string[] = [];
+            const streamOutput = (chunk: string): void => {
+                outputChunks.push(chunk);
+                this.outputChannel.append(chunk);
+            };
+
+            const child = spawn(command, [], {
                 cwd,
-                maxBuffer: 10 * 1024 * 1024 // 10MB buffer
+                shell: true,
+                env: {
+                    ...process.env,
+                    GIT_PROGRESS_DELAY: '0'
+                }
             });
 
-            if (stdout) {
-                this.log('Output:');
-                this.log(stdout);
-            }
+            child.stdout?.on('data', (data: Buffer) => {
+                streamOutput(data.toString());
+            });
 
-            if (stderr && stderr.trim()) {
-                this.log('Warnings/Info:');
-                this.log(stderr);
-            }
+            child.stderr?.on('data', (data: Buffer) => {
+                streamOutput(data.toString());
+            });
 
-            this.log(`✅ Status: Success\n`);
+            child.on('error', (error: Error) => {
+                const errorMessage = error.message;
+                this.log(`\n❌ Status: Failed\n`);
+                this.log(`Error Message: ${errorMessage}\n`);
 
-            // Update step to success
-            if (this.treeProvider) {
-                this.treeProvider.updateStepStatus(sessionId, stepIndex, CommandStatus.Success);
-            }
+                if (this.treeProvider) {
+                    this.treeProvider.updateStepStatus(
+                        sessionId,
+                        stepIndex,
+                        CommandStatus.Failed,
+                        this.truncateError(errorMessage)
+                    );
+                }
 
-            return { success: true };
+                resolve({ success: false, errorMessage: this.truncateError(errorMessage, 500) });
+            });
 
-        } catch (error: any) {
-            this.log(`❌ Status: Failed\n`);
-            this.log(`${'▼'.repeat(60)}`);
-            this.log('ERROR DETAILS:');
-            this.log(`${'▼'.repeat(60)}`);
+            child.on('close', (code) => {
+                if (code === 0) {
+                    this.log(`\n✅ Status: Success\n`);
 
-            let errorMessage = '';
+                    if (this.treeProvider) {
+                        this.treeProvider.updateStepStatus(sessionId, stepIndex, CommandStatus.Success);
+                    }
 
-            if (error.stdout) {
-                this.log('Standard Output:');
-                this.log(error.stdout);
-                errorMessage += error.stdout;
-            }
+                    resolve({ success: true });
+                    return;
+                }
 
-            if (error.stderr) {
-                this.log('Error Output:');
-                this.log(error.stderr);
-                errorMessage += '\n' + error.stderr;
-            }
+                const errorMessage = outputChunks.join('').trim() || `Command exited with code ${code}`;
+                this.log(`\n❌ Status: Failed (exit code ${code})\n`);
+                this.log(`${'▼'.repeat(60)}`);
+                this.log('ERROR DETAILS:');
+                this.log(`${'▼'.repeat(60)}`);
+                this.log(errorMessage);
+                this.log(`${'▲'.repeat(60)}\n`);
 
-            if (error.message) {
-                this.log('Error Message:');
-                this.log(error.message);
-                errorMessage += '\n' + error.message;
-            }
+                if (this.treeProvider) {
+                    this.treeProvider.updateStepStatus(
+                        sessionId,
+                        stepIndex,
+                        CommandStatus.Failed,
+                        this.truncateError(errorMessage)
+                    );
+                }
 
-            this.log(`${'▲'.repeat(60)}\n`);
-
-            // Update step to failed with error
-            if (this.treeProvider) {
-                this.treeProvider.updateStepStatus(
-                    sessionId,
-                    stepIndex,
-                    CommandStatus.Failed,
-                    this.truncateError(errorMessage)
-                );
-            }
-
-            return { success: false, errorMessage: this.truncateError(errorMessage, 500) };
-        }
+                resolve({ success: false, errorMessage: this.truncateError(errorMessage, 500) });
+            });
+        });
     }
 
     /**
