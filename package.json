@@ -2,7 +2,7 @@
   "name": "flutter-build-utils",
   "displayName": "flutter-toolbox",
   "description": "Comprehensive Flutter development toolkit with build automation (APK, IPA, Web), utilities (Clean, Pub Get, Build Runner, Analyze, Format, Pod Install), and MCP config generators. Real-time status tracking in sidebar.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "skalex",
   "engines": {
     "vscode": "^1.85.0"
@@ -179,6 +179,16 @@
         "command": "flutter-build-utils.generateFreezedModel",
         "title": "Flutter: Generate Freezed Model",
         "icon": "$(symbol-property)"
+      },
+      {
+        "command": "flutter-build-utils.showActivePackage",
+        "title": "Flutter: Show Active Package",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "flutter-build-utils.setActivePackage",
+        "title": "Flutter: Set Active Package",
+        "icon": "$(symbol-folder)"
       },
       {
         "command": "flutter-build-utils.addFlutterCursorRules",

@@ -15,6 +15,7 @@ import {
     generateFreezedModel,
     generateFreezedUiState
 } from './codeGenerator';
+import { setActivePackage, showActivePackage } from './cursorActivePackage';
 import { hasGitmodules, parseGitmodules } from './submoduleUtils';
 import { BuildType } from './types';
 import { UtilityRunner } from './utilityRunner';
@@ -199,6 +200,16 @@ export function activate(context: vscode.ExtensionContext) {
         () => generateFreezedModel()
     );
 
+    const showActivePackageCommand = vscode.commands.registerCommand(
+        'flutter-build-utils.showActivePackage',
+        () => showActivePackage()
+    );
+
+    const setActivePackageCommand = vscode.commands.registerCommand(
+        'flutter-build-utils.setActivePackage',
+        () => setActivePackage()
+    );
+
     const addFlutterCursorRulesCommand = vscode.commands.registerCommand(
         'flutter-build-utils.addFlutterCursorRules',
         () => handleAddFlutterCursorRules(context)
@@ -284,6 +295,8 @@ export function activate(context: vscode.ExtensionContext) {
         generateFreezedApiStateCommand,
         generateFreezedUiStateCommand,
         generateFreezedModelCommand,
+        showActivePackageCommand,
+        setActivePackageCommand,
         addFlutterCursorRulesCommand,
         submoduleUpdateCommand,
         submoduleRemoteStatusCommand,

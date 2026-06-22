@@ -299,6 +299,22 @@ export class BuildTreeProvider implements vscode.TreeDataProvider<BuildTreeItem>
         // MCP action buttons
         items.push(
             new BuildTreeItem(
+                '  Show Active Package',
+                'Show Cursor active package from .cursorignore',
+                vscode.TreeItemCollapsibleState.None,
+                'mcpAction',
+                new vscode.ThemeIcon('eye', new vscode.ThemeColor('charts.cyan')),
+                'flutter-build-utils.showActivePackage'
+            ),
+            new BuildTreeItem(
+                '  Set Active Package',
+                'Set which packages/ folders Cursor indexes (multi-select)',
+                vscode.TreeItemCollapsibleState.None,
+                'mcpAction',
+                new vscode.ThemeIcon('symbol-folder', new vscode.ThemeColor('charts.yellow')),
+                'flutter-build-utils.setActivePackage'
+            ),
+            new BuildTreeItem(
                 '  Generate FYERS UI MCP Config',
                 'Generate MCP configuration for fy_ui library',
                 vscode.TreeItemCollapsibleState.None,
