@@ -5,7 +5,8 @@ import * as vscode from 'vscode';
 const OUTPUT_CHANNEL_NAME = 'flutter-toolbox';
 const BLOCK_COMMENT_RE = /^#\s*Active packages?:\s*(.+?)(?:\s+—.*)?$/;
 const PACKAGES_IGNORE_RE = /^packages\/\*$/;
-const NEGATION_RE = /^!packages\/([^/]+)\/\*\*$/;
+const NEGATION_DIR_RE = /^!packages\/([^/]+)\/$/;
+const NEGATION_RECURSE_RE = /^!packages\/([^/]+)\/\*\*$/;
 
 export interface ActivePackageStatus {
     monorepoRoot: string;
@@ -103,9 +104,11 @@ export function parseActivePackageBlock(content: string): Omit<ActivePackageStat
         if (PACKAGES_IGNORE_RE.test(line.trim())) {
             hasPackagesIgnore = true;
         }
-        const negationMatch = line.match(NEGATION_RE);
-        if (negationMatch) {
-            negatedPackages.push(negationMatch[1]);
+        const dirNegationMatch = line.match(NEGATION_DIR_RE);
+        const recurseNegationMatch = line.match(NEGATION_RECURSE_RE);
+        const packageName = dirNegationMatch?.[1] ?? recurseNegationMatch?.[1];
+        if (packageName && !negatedPackages.includes(packageName)) {
+            negatedPackages.push(packageName);
         }
     }
 
@@ -113,7 +116,16 @@ export function parseActivePackageBlock(content: string): Omit<ActivePackageStat
         warnings.push('Missing `packages/*` ignore line.');
     }
     if (negatedPackages.length === 0) {
-        warnings.push('Missing `!packages/<name>/**` exception line(s).');
+        warnings.push('Missing `!packages/<name>/` and `!packages/<name>/**` exception line(s).');
+    }
+    for (const pkg of activePackages.length > 0 ? activePackages : negatedPackages) {
+        const blockText = blockLines.join('\n');
+        if (!new RegExp(`^!packages/${pkg}/$`, 'm').test(blockText)) {
+            warnings.push(`Missing directory negation for ${pkg}: \`!packages/${pkg}/\``);
+        }
+        if (!new RegExp(`^!packages/${pkg}/\\*\\*$`, 'm').test(blockText)) {
+            warnings.push(`Missing recursive negation for ${pkg}: \`!packages/${pkg}/**\``);
+        }
     }
     if (activePackages.length === 0) {
         warnings.push('No package names found in active package comment.');
@@ -133,7 +145,8 @@ export function parseActivePackageBlock(content: string): Omit<ActivePackageStat
         activePackages.length > 0 &&
         negatedPackages.length > 0 &&
         hasPackagesIgnore &&
-        samePackageSet(activePackages, negatedPackages);
+        samePackageSet(activePackages, negatedPackages) &&
+        warnings.length === 0;
 
     return {
         activePackages,
@@ -150,8 +163,9 @@ export function buildActivePackageBlock(packageNames: string[]): string {
     const heading = sorted.length === 1 ? 'Active package' : 'Active packages';
     const lines = [
         `# ${heading}: ${sorted.join(', ')} — ignore all other packages`,
+        '# Negation requires un-ignoring the directory before its contents (gitignore rule).',
         'packages/*',
-        ...sorted.map((name) => `!packages/${name}/**`)
+        ...sorted.flatMap((name) => [`!packages/${name}/`, `!packages/${name}/**`])
     ];
 
     return lines.join('\n');
