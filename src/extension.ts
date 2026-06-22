@@ -234,6 +234,16 @@ export function activate(context: vscode.ExtensionContext) {
         () => handleSubmoduleUpdateRemoteOne()
     );
 
+    const submoduleResetAllCommand = vscode.commands.registerCommand(
+        'flutter-build-utils.submoduleResetAll',
+        () => handleSubmoduleResetAll()
+    );
+
+    const submoduleResetOneCommand = vscode.commands.registerCommand(
+        'flutter-build-utils.submoduleResetOne',
+        () => handleSubmoduleResetOne()
+    );
+
     const gitPushCommand = vscode.commands.registerCommand(
         'flutter-build-utils.gitPush',
         () => handleGitCommand('push')
@@ -281,6 +291,8 @@ export function activate(context: vscode.ExtensionContext) {
         submoduleUpdateRemoteAllCommand,
         submoduleUpdateAndPubGetCommand,
         submoduleUpdateRemoteOneCommand,
+        submoduleResetAllCommand,
+        submoduleResetOneCommand,
         gitPushCommand,
         gitPullCommand,
         gitPullAllInFolderCommand,
@@ -1512,6 +1524,83 @@ async function handleSubmoduleUpdateAndPubGet(): Promise<void> {
         await utilityRunner.executeSubmoduleUpdateAndPubGet(workspaceFolder, flutterCommand);
     } catch (error: any) {
         vscode.window.showErrorMessage(`Submodule update + pub get error: ${error.message}`);
+    }
+}
+
+async function handleSubmoduleResetAll(): Promise<void> {
+    try {
+        const workspaceFolder = await requireSubmoduleWorkspace();
+        if (!workspaceFolder) {
+            return;
+        }
+
+        const entries = parseGitmodules(workspaceFolder);
+        const choice = await vscode.window.showWarningMessage(
+            `Hard reset and clean all ${entries.length} submodules (recursive)? Uncommitted changes and untracked files inside submodules will be lost.`,
+            { modal: true },
+            'Reset All'
+        );
+
+        if (choice !== 'Reset All') {
+            return;
+        }
+
+        const flutterCommand = getFlutterCommand();
+        await utilityRunner.executeSubmoduleResetAll(workspaceFolder, flutterCommand);
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Submodule reset (all) error: ${error.message}`);
+    }
+}
+
+async function handleSubmoduleResetOne(): Promise<void> {
+    try {
+        const workspaceFolder = await requireSubmoduleWorkspace();
+        if (!workspaceFolder) {
+            return;
+        }
+
+        const entries = parseGitmodules(workspaceFolder);
+        if (entries.length === 0) {
+            vscode.window.showErrorMessage('No submodules found in .gitmodules.');
+            return;
+        }
+
+        const pick = await vscode.window.showQuickPick(
+            entries.map(entry => ({
+                label: entry.name,
+                description: entry.branch ? `${entry.path} (${entry.branch})` : entry.path,
+                detail: entry.url,
+                entry
+            })),
+            {
+                placeHolder: 'Select submodule to hard reset and clean',
+                ignoreFocusOut: true
+            }
+        );
+
+        if (!pick) {
+            return;
+        }
+
+        const choice = await vscode.window.showWarningMessage(
+            `Hard reset and clean ${pick.entry.path}? Uncommitted changes and untracked files in this submodule will be lost.`,
+            { modal: true },
+            'Reset'
+        );
+
+        if (choice !== 'Reset') {
+            return;
+        }
+
+        const flutterCommand = getFlutterCommand();
+        await utilityRunner.executeSubmoduleResetOne(
+            workspaceFolder,
+            pick.entry.path,
+            pick.entry.name,
+            flutterCommand
+        );
+    } catch (error: any) {
+        vscode.window.showErrorMessage(`Submodule reset (one) error: ${error.message}`);
     }
 }
 

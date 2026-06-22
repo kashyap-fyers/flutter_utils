@@ -229,6 +229,16 @@
         "command": "flutter-build-utils.submoduleUpdateRemoteOne",
         "title": "Git: Bump Single Submodule",
         "icon": "$(arrow-up)"
+      },
+      {
+        "command": "flutter-build-utils.submoduleResetAll",
+        "title": "Git: Submodule Reset (All)",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "flutter-build-utils.submoduleResetOne",
+        "title": "Git: Submodule Reset (One)",
+        "icon": "$(discard)"
       }
     ],
     "menus": {

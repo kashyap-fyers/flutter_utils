@@ -444,6 +444,22 @@ export class BuildTreeProvider implements vscode.TreeDataProvider<BuildTreeItem>
                 'gitAction',
                 new vscode.ThemeIcon('arrow-up', new vscode.ThemeColor('charts.purple')),
                 'flutter-build-utils.submoduleUpdateRemoteOne'
+            ),
+            new BuildTreeItem(
+                '  Submodule Reset (All)',
+                'git reset --hard && git clean -fd in every submodule (recursive)',
+                vscode.TreeItemCollapsibleState.None,
+                'gitAction',
+                new vscode.ThemeIcon('discard', new vscode.ThemeColor('charts.red')),
+                'flutter-build-utils.submoduleResetAll'
+            ),
+            new BuildTreeItem(
+                '  Submodule Reset (One)',
+                'Hard reset and clean a single selected submodule',
+                vscode.TreeItemCollapsibleState.None,
+                'gitAction',
+                new vscode.ThemeIcon('discard', new vscode.ThemeColor('charts.orange')),
+                'flutter-build-utils.submoduleResetOne'
             )
         );
 

@@ -24,7 +24,7 @@ export interface SubmoduleCommandSpec {
     command: string;
 }
 
-function shellQuotePath(submodulePath: string): string {
+export function shellQuotePath(submodulePath: string): string {
     if (/^[a-zA-Z0-9_./-]+$/.test(submodulePath)) {
         return submodulePath;
     }
@@ -55,6 +55,14 @@ export function buildSubmoduleCommandSpecs(
             command: `git submodule update --init${remoteFlag} --progress -- ${quotedPath}`
         };
     });
+}
+
+export const SUBMODULE_RESET_ALL_COMMAND =
+    "git submodule foreach --recursive 'git reset --hard HEAD && git clean -fd'";
+
+export function buildSubmoduleResetOneCommand(submodulePath: string): string {
+    const quotedPath = shellQuotePath(submodulePath);
+    return `git -C ${quotedPath} reset --hard HEAD && git -C ${quotedPath} clean -fd`;
 }
 
 /**

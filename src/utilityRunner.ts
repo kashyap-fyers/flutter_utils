@@ -11,7 +11,11 @@ import {
     scanSubmoduleRemoteStatuses,
     SubmoduleRemoteScanResult
 } from './submoduleStatus';
-import { buildSubmoduleCommandSpecs } from './submoduleUtils';
+import {
+    buildSubmoduleCommandSpecs,
+    buildSubmoduleResetOneCommand,
+    SUBMODULE_RESET_ALL_COMMAND
+} from './submoduleUtils';
 import { BuildSession, BuildStep, CommandStatus, SessionStatus, SessionType } from './types';
 
 const execAsync = promisify(exec);
@@ -19,6 +23,19 @@ const execAsync = promisify(exec);
 interface UtilitySessionOptions {
     skipFlutterVersion?: boolean;
     skipSessionPreamble?: boolean;
+    continueOnFailure?: boolean;
+}
+
+interface FailedStepSummary {
+    description: string;
+    errorMessage?: string;
+}
+
+interface UtilitySessionResult {
+    success: boolean;
+    errorMessage?: string;
+    failedSteps?: FailedStepSummary[];
+    succeededCount?: number;
 }
 
 export class UtilityRunner {
@@ -363,7 +380,7 @@ export class UtilityRunner {
     async executeSubmoduleUpdateRemoteAll(
         workspaceFolder: string,
         flutterCommand: string
-    ): Promise<{ success: boolean; errorMessage?: string }> {
+    ): Promise<UtilitySessionResult> {
         const steps = this.buildSubmoduleSteps(workspaceFolder, 'remote');
 
         return this.executeUtilityWithSession(
@@ -371,7 +388,7 @@ export class UtilityRunner {
             flutterCommand,
             'Submodule Update Remote (All)',
             steps,
-            { skipFlutterVersion: true }
+            { skipFlutterVersion: true, continueOnFailure: true }
         );
     }
 
@@ -396,6 +413,52 @@ export class UtilityRunner {
             flutterCommand,
             'Submodule Update + Pub Get',
             steps,
+            { skipFlutterVersion: true }
+        );
+    }
+
+    /**
+     * Hard reset and clean every submodule (recursive).
+     */
+    async executeSubmoduleResetAll(
+        workspaceFolder: string,
+        flutterCommand: string
+    ): Promise<UtilitySessionResult> {
+        return this.executeUtilityWithSession(
+            workspaceFolder,
+            flutterCommand,
+            'Submodule Reset (All)',
+            [
+                {
+                    id: 'submodule-reset-all',
+                    description: 'Hard reset and clean all submodules (recursive)',
+                    command: SUBMODULE_RESET_ALL_COMMAND
+                }
+            ],
+            { skipFlutterVersion: true }
+        );
+    }
+
+    /**
+     * Hard reset and clean one submodule.
+     */
+    async executeSubmoduleResetOne(
+        workspaceFolder: string,
+        submodulePath: string,
+        submoduleName: string,
+        flutterCommand: string
+    ): Promise<UtilitySessionResult> {
+        return this.executeUtilityWithSession(
+            workspaceFolder,
+            flutterCommand,
+            `Submodule Reset (${submoduleName})`,
+            [
+                {
+                    id: 'submodule-reset-one',
+                    description: `Hard reset and clean ${submodulePath}`,
+                    command: buildSubmoduleResetOneCommand(submodulePath)
+                }
+            ],
             { skipFlutterVersion: true }
         );
     }
@@ -549,13 +612,34 @@ export class UtilityRunner {
     /**
      * Execute utility with session tracking
      */
+    private logFailedStepsSummary(
+        failedSteps: FailedStepSummary[],
+        succeededCount: number,
+        totalSteps: number
+    ): void {
+        this.log(`\n${'─'.repeat(60)}`);
+        this.log(`Failed submodules (${failedSteps.length}):`);
+        this.log(`${'─'.repeat(60)}`);
+        for (const failed of failedSteps) {
+            this.log(`  ✗ ${failed.description}`);
+            if (failed.errorMessage) {
+                const oneLine = failed.errorMessage.replace(/\s+/g, ' ').trim();
+                const truncated = oneLine.length > 120 ? oneLine.substring(0, 120) + '...' : oneLine;
+                this.log(`      ${truncated}`);
+            }
+        }
+        this.log('');
+        this.log(`Result: ${succeededCount} succeeded, ${failedSteps.length} failed (${totalSteps} total).`);
+        this.log(`${'─'.repeat(60)}\n`);
+    }
+
     private async executeUtilityWithSession(
         workspaceFolder: string,
         flutterCommand: string,
         utilityName: string,
         steps: BuildStep[],
         options?: UtilitySessionOptions
-    ): Promise<{ success: boolean; errorMessage?: string }> {
+    ): Promise<UtilitySessionResult> {
         if (!options?.skipSessionPreamble) {
             this.outputChannel.clear();
             this.outputChannel.show(true);
@@ -603,6 +687,8 @@ export class UtilityRunner {
 
         let stepIndex = 0;
         const totalSteps = steps.length;
+        const failedSteps: FailedStepSummary[] = [];
+        let succeededCount = 0;
 
         for (const step of steps) {
             const command = step.command.replace('{FLUTTER_CMD}', flutterCommand);
@@ -625,6 +711,15 @@ export class UtilityRunner {
             const stepResult = await this.executeCommand(command, workspaceFolder, step, sessionId, stepIndex);
 
             if (!stepResult.success) {
+                if (options?.continueOnFailure) {
+                    failedSteps.push({
+                        description: step.description,
+                        errorMessage: stepResult.errorMessage
+                    });
+                    stepIndex++;
+                    continue;
+                }
+
                 // Update to failed
                 if (this.treeProvider) {
                     this.treeProvider.completeBuildSession(sessionId, SessionStatus.Failed);
@@ -642,28 +737,74 @@ export class UtilityRunner {
                 return { success: false, errorMessage: stepResult.errorMessage };
             }
 
+            succeededCount++;
             stepIndex++;
         }
 
-        // Completed successfully
+        if (options?.continueOnFailure && failedSteps.length > 0) {
+            this.logFailedStepsSummary(failedSteps, succeededCount, totalSteps);
+        }
+
+        const allFailed = options?.continueOnFailure && failedSteps.length === totalSteps;
+        const partialFailure = options?.continueOnFailure && failedSteps.length > 0 && !allFailed;
+
         if (this.treeProvider) {
-            this.treeProvider.completeBuildSession(sessionId, SessionStatus.Completed);
+            this.treeProvider.completeBuildSession(
+                sessionId,
+                allFailed ? SessionStatus.Failed : SessionStatus.Completed
+            );
+        }
+
+        if (allFailed) {
+            this.log(`\n${'='.repeat(60)}`);
+            this.log(`❌ ${utilityName} — all submodules failed`);
+            this.log(`${'='.repeat(60)}\n`);
+
+            this.statusBarItem.text = `$(error) ${utilityName} Failed`;
+            this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+
+            vscode.window.showErrorMessage(
+                `${utilityName}: all ${failedSteps.length} submodules failed. See Output for details.`
+            );
+
+            setTimeout(() => {
+                this.statusBarItem.hide();
+            }, 5000);
+
+            return { success: false, failedSteps, succeededCount };
         }
 
         this.log(`\n${'='.repeat(60)}`);
-        this.log(`✅ ${utilityName} Completed Successfully!`);
+        if (partialFailure) {
+            this.log(`⚠️  ${utilityName} completed with ${failedSteps.length} failure(s)`);
+        } else {
+            this.log(`✅ ${utilityName} Completed Successfully!`);
+        }
         this.log(`${'='.repeat(60)}\n`);
 
-        this.statusBarItem.text = `$(check) ${utilityName} Complete`;
-        this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.prominentBackground');
+        if (partialFailure) {
+            this.statusBarItem.text = `$(warning) ${utilityName}: ${failedSteps.length} failed`;
+            this.statusBarItem.backgroundColor = undefined;
 
-        vscode.window.showInformationMessage(`${utilityName} completed successfully!`);
+            vscode.window.showInformationMessage(
+                `${utilityName}: ${succeededCount} succeeded, ${failedSteps.length} failed. See Output for details.`
+            );
+        } else {
+            this.statusBarItem.text = `$(check) ${utilityName} Complete`;
+            this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.prominentBackground');
+
+            vscode.window.showInformationMessage(`${utilityName} completed successfully!`);
+        }
 
         setTimeout(() => {
             this.statusBarItem.hide();
         }, 5000);
 
-        return { success: true };
+        return {
+            success: failedSteps.length === 0,
+            failedSteps: failedSteps.length > 0 ? failedSteps : undefined,
+            succeededCount
+        };
     }
 
     /**
